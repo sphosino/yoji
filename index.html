@@ -97,14 +97,20 @@ h1{flex:1;margin:0;font-family:var(--pop);font-weight:400;font-size:1.1rem;color
 <div class="toast" id="toast" hidden></div>
 
 <script src="data.js"></script>
+<script src="core.js"></script>
 <script>
 'use strict';
+// 画面は、いまの様子 V を描くだけ。V を作って動かすのは ENG（ひとりで遊ぶ：この下の SOLO、みんなで遊ぶ：online.js）
+//   V：{q, chars:[{ch, slots:[{by}], at, pts}], hinted:[], players:[{n,c,cpu,think}], me（自分の番号。観戦なら -1）, tiles:[札], t0, over}
+//   札：{id, src:[字の番号,部品の番号], where:'hand'|'desk'|'air'|'placed', holder, held, dropBy, u, band, v,
+//        from（運び始め：'hand' か {u,band,v}）, to（行き先：{i} か {u,band,v}）, go（動き出したか）, dx, dy（だれかが指で動かしている場所。机に対する 0〜1）}
+//   ENG：{grab(id), drop(id, 行き先), hint(), quit()}。行き先は {i}（枠）・{u,band,v}（机）・{hand:true}
 const $=id=>document.getElementById(id);
-const D=window.YOJI;
+const D=window.YOJI,C=window.YojiCore;
 const store={get(k,d){try{const v=localStorage.getItem(k);return v==null?d:JSON.parse(v)}catch(e){return d}},set(k,v){try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}}};
-const ME_COL='#e8743b',CPU_DEF=[{n:'ハル',c:'#43b2f5'},{n:'ミオ',c:'#6cc94e'},{n:'ソウ',c:'#b45cc8'}];
-const shuffle=a=>{for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]]}return a};
+const COLS=['#e8743b','#43b2f5','#6cc94e','#b45cc8','#ff6f9f','#e0a21c'],CPU_NAMES=['ハル','ミオ','ソウ','ナギ','ユイ'];
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+let V=null,ENG=null;
 
 // ---------- 部品の形 ----------
 // 部品の線を、漢字の中にあるときの大きさのまま描く。札には、線のまわりだけを切り出して見せる（getBBox で線の範囲を測る）
@@ -114,181 +120,163 @@ function boxOf(d){const k=d.join('|');if(boxCache.has(k))return boxCache.get(k);
   meas.innerHTML=`<g>${d.map(x=>`<path d="${x}"/>`).join('')}</g>`;const b=meas.firstChild.getBBox();const pad=7;
   const s=Math.max(b.width,b.height)+pad*2,cx=b.x+b.width/2,cy=b.y+b.height/2;const r=[cx-s/2,cy-s/2,s,s];boxCache.set(k,r);return r}
 const strokes=(d,col='#3b2a20',w=4.2)=>`<g fill="none" stroke="${col}" stroke-width="${w}" stroke-linecap="round" stroke-linejoin="round">${d.map(x=>`<path d="${x}"/>`).join('')}</g>`;
-const tileSVG=d=>`<svg viewBox="${boxOf(d).join(' ')}">${strokes(d)}</svg>`;
-
-// ---------- 状態 ----------
-let G=null,cpuN=store.get('yj-cpu',2),qi=store.get('yj-q',3);   // はじめては温故知新から（部品が分かれる字が多い。一石二鳥は全部まるごとの字で、協力が生まれにくい）
-// G：{q, chars:[{ch, slots:[{el,pos,d,by,owner}], at:null, pts}], tiles:Map, players:[{n,c,cpu}], t0, hints, over}
-// 札（tile）：{id, el, pos, d, owner（配られた人）, where:'hand'|'desk'|'placed'|'fly', holder, x, y}
-function newGame(){
-  const q=D.list[qi%D.list.length];qi++;store.set('yj-q',qi);
-  const players=[{n:'あなた',c:ME_COL,cpu:false},...CPU_DEF.slice(0,cpuN).map(p=>({...p,cpu:true,next:0}))];
-  const chars=[...q.w].map(ch=>({ch,slots:D.K[ch].map(p=>({el:p.el,pos:p.pos,d:p.d,by:null,owner:null})),at:null,pts:null}));
-  // 札を作って配る（ひとりのときは全部自分）。1人に偏らないよう、まぜてから順に
-  const all=shuffle(chars.flatMap((c,i)=>c.slots.map(s=>({el:s.el,pos:s.pos,d:s.d}))));
-  const tiles=new Map();
-  all.forEach((t,k)=>{const id='t'+k,o=k%players.length;tiles.set(id,{id,...t,owner:o,holder:o,where:'hand'})});
-  G={q,chars,tiles,players,t0:performance.now(),hints:0,over:false,hinted:new Set()};
-  players.forEach((p,i)=>{if(p.cpu)p.next=G.t0+1800+Math.random()*1500+i*500});
-  $('yomi').textContent=q.y;$('imi').textContent=q.m;
-  $('frames').innerHTML=chars.map((c,i)=>`<div class="frame" data-i="${i}"><svg viewBox="0 0 109 109"></svg></div>`).join('');
-  [...$('desk').querySelectorAll('.tile')].forEach(e=>e.remove());
-  $('start').hidden=true;$('result').hidden=true;$('hintBtn').hidden=false;$('quitBtn').hidden=false;
-  render();
-}
-const elOf=id=>document.querySelector(`.tile[data-id="${id}"]`);
-function tileEl(t){const e=document.createElement('div');e.className='tile';e.dataset.id=t.id;e.innerHTML=tileSVG(t.d)+'<b class="who"></b><i class="dot"></i>';e.addEventListener('pointerdown',grab);return e}
-// 札に「だれがつかんでいるか」「だれが机に出したか」を付ける
-function markTile(e,t){const h=t.held,p=h!=null?G.players[h]:null;e.classList.toggle('held',!!p);
-  if(p){e.style.setProperty('--pc',p.c);e.querySelector('.who').textContent=p.n}
-  const dp=t.where==='desk'&&t.dropBy!=null?G.players[t.dropBy]:null;e.classList.toggle('dot',!!dp);if(dp)e.style.setProperty('--dc',dp.c)}
-
-// ---------- 描く ----------
-function render(){
-  if(!G)return;
-  // 仲間（手札の数）
-  $('mates').innerHTML=G.players.map((p,i)=>`<span class="mate${p.think?' think':''}" style="--c:${p.c}" data-p="${i}"><i></i>${esc(p.n)}<small>${[...G.tiles.values()].filter(t=>t.where==='hand'&&t.holder===i).length}枚</small></span>`).join('');
-  // 枠：はまった部品は、はめた人の色で描く。ヒントで見せた文字は薄く
-  G.chars.forEach((c,i)=>{const f=$('frames').children[i],sv=f.querySelector('svg');
-    sv.innerHTML=(G.hinted.has(i)?strokes(c.slots.flatMap(s=>s.d),'#e8d6bf',3.6):'')+c.slots.filter(s=>s.by!=null).map(s=>strokes(s.d,c.at!=null?'#3b2a20':G.players[s.by].c)).join('');
-    f.classList.toggle('done',c.at!=null)});
-  // 手札
-  const hand=$('hand'),mine=[...G.tiles.values()].filter(t=>t.where==='hand'&&t.holder===0);
-  [...hand.querySelectorAll('.tile,.empty')].forEach(e=>{if(!e.classList.contains('tile')||!mine.some(t=>t.id===e.dataset.id))e.remove()});
-  for(const t of mine)if(!hand.querySelector(`.tile[data-id="${t.id}"]`))hand.append(tileEl(t));
-  if(!mine.length)hand.insertAdjacentHTML('beforeend','<span class="empty">手札はもうありません。机の部品も拾えます</span>');
-  // 机に転がっている部品
-  const desk=$('desk');
-  for(const t of G.tiles.values()){let e=desk.querySelector(`.tile[data-id="${t.id}"]`);
-    if(t.where==='desk'||t.where==='fly'){if(!e){e=tileEl(t);desk.append(e)}if(!e.classList.contains('drag')){e.style.left=t.x+'px';e.style.top=t.y+'px'}markTile(e,t)}
-    else if(e&&!e.classList.contains('drag'))e.remove()}
-}
-function toast(m){const t=$('toast');t.textContent=m;t.hidden=false;clearTimeout(toast.k);toast.k=setTimeout(()=>t.hidden=true,1600)}
+const dOf=(q,src)=>D.K[[...q.w][src[0]]][src[1]].d;   // 札の線：配られたときの字の、その部品
+const slotD=(ch,j)=>D.K[ch][j].d;
 
 // ---------- 机の上の場所 ----------
-// 転がる場所：枠の上と下の帯のどこか（枠と重ならない、ほかの部品ともなるべく重ならない）
-function freeSpot(nearX){
-  const d=$('desk').getBoundingClientRect(),fr=$('frames').getBoundingClientRect(),S=58;
-  const bands=[[8,fr.top-d.top-S-6],[fr.bottom-d.top+6,d.height-S-8]].filter(([a,b])=>b>=a);
-  let best=null,bs=-1;
-  for(let k=0;k<24;k++){const [a,b]=bands[k%bands.length]||[8,8];
-    const x=nearX!=null&&k<12?Math.max(8,Math.min(d.width-S-8,nearX-S/2+(Math.random()-.5)*120)):8+Math.random()*(d.width-S-16),y=a+Math.random()*(b-a);
-    const gap=Math.min(999,...[...G.tiles.values()].filter(t=>t.where==='desk').map(t=>Math.hypot(t.x-x,t.y-y)));
-    if(gap>bs){bs=gap;best={x,y}}if(gap>S+6)break}
-  return best||{x:8,y:8}}
+// 机は枠の上と下に、部品が転がる帯がある。札の場所 {u,band,v} を、この画面の机の中の px にする
+const S=58;
+function bandBox(band){const d=$('desk').getBoundingClientRect(),fr=$('frames').getBoundingClientRect();
+  const top=band?fr.bottom-d.top+6:8,bot=band?d.height-S-8:fr.top-d.top-S-6;return {x0:8,x1:Math.max(8,d.width-S-8),y0:top,y1:Math.max(top,bot)}}
+function px(p){const b=bandBox(p.band);return {x:b.x0+p.u*(b.x1-b.x0),y:b.y0+p.v*(b.y1-b.y0)}}
+function fromPx(x,y){const d=$('desk').getBoundingClientRect(),fr=$('frames').getBoundingClientRect(),band=y+S/2>fr.top-d.top+fr.height/2?1:0,b=bandBox(band);
+  const cl=a=>Math.max(0,Math.min(1,a));return {u:cl((x-b.x0)/Math.max(1,b.x1-b.x0)),band,v:cl((y-b.y0)/Math.max(1,b.y1-b.y0))}}
+function framePx(i){const d=$('desk').getBoundingClientRect(),f=$('frames').children[i].getBoundingClientRect();return {x:f.left-d.left+f.width/2-S/2,y:f.top-d.top+f.height/2-S/2}}
+function matePx(p){const d=$('desk').getBoundingClientRect(),m=document.querySelector(`.mate[data-p="${p}"]`),r=m?m.getBoundingClientRect():d;return {x:Math.max(6,Math.min(d.width-S-6,r.left-d.left+10)),y:22}}
 function frameAt(cx,cy){for(const f of $('frames').children){const r=f.getBoundingClientRect();if(cx>=r.left&&cx<=r.right&&cy>=r.top&&cy<=r.bottom)return +f.dataset.i}return -1}
 
-// ---------- 置く ----------
-// 枠 i に札をはめる。同じ部品（同じ字・同じ場所）の空きがあれば、はまる。なければ机に転がる
-function place(t,i,by){
-  const c=G.chars[i],s=c&&c.at==null&&c.slots.find(s=>s.by==null&&s.el===t.el&&s.pos===t.pos);
-  if(!s){toDesk(t,i,undefined,undefined,by);if(by===0)toast('ここではないみたい…');return false}
-  s.by=by;s.owner=t.owner;t.where='placed';
-  if(c.slots.every(s=>s.by!=null))finishChar(i);
-  render();check();return true}
-function toDesk(t,nearFrame,x,y,by){
-  if(x==null){const d=$('desk').getBoundingClientRect(),f=nearFrame>=0?$('frames').children[nearFrame].getBoundingClientRect():null;const p=freeSpot(f?f.left-d.left+f.width/2:null);x=p.x;y=p.y}
-  t.where='desk';t.holder=null;t.held=null;t.dropBy=by;t.x=x;t.y=y;render()}
-// 1文字できた：速さ（始めてからの秒）と協力（何人で作ったか・ほかの人に配られた部品を使ったか）
-function finishChar(i){
-  const c=G.chars[i],sec=(performance.now()-G.t0)/1000;c.at=sec;
-  const who=new Set(c.slots.map(s=>s.by)),foreign=c.slots.filter(s=>s.by!==s.owner).length;
-  const speed=Math.max(10,Math.round(100-sec*1.2)),coop=(who.size-1)*25+foreign*15,hint=G.hinted.has(i)?-20:0;
-  c.pts={speed,coop,hint,sum:Math.max(0,speed+coop+hint),who:[...who]};
-  const f=$('frames').children[i];f.insertAdjacentHTML('beforeend',`<span class="pts">+${c.pts.sum}</span>`);
+// ---------- 描く ----------
+let shownQ=null;
+function tileEl(t){const e=document.createElement('div');e.className='tile';e.dataset.id=t.id;e.innerHTML=`<svg viewBox="${boxOf(dOf(V.q,t.src)).join(' ')}">${strokes(dOf(V.q,t.src))}</svg><b class="who"></b><i class="dot"></i>`;e.addEventListener('pointerdown',grab);return e}
+// 札に「だれがつかんでいるか」「だれが机に出したか」を付ける
+function markTile(e,t){const p=t.held!=null?V.players[t.held]:null;e.classList.toggle('held',!!p);
+  if(p){e.style.setProperty('--pc',p.c);e.querySelector('.who').textContent=p.n}
+  const dp=t.where==='desk'&&t.dropBy!=null?V.players[t.dropBy]:null;e.classList.toggle('dot',!!dp);if(dp)e.style.setProperty('--dc',dp.c)}
+function render(){
+  if(!V)return;
+  if(shownQ!==V){/* 新しい問題：枠を作り直す */}
+  const key=V.q.w+':'+(V.game||0);
+  if(shownQ!==key){shownQ=key;$('yomi').textContent=V.q.y;$('imi').textContent=V.q.m;
+    $('frames').innerHTML=V.chars.map((c,i)=>`<div class="frame" data-i="${i}"><svg viewBox="0 0 109 109"></svg></div>`).join('');
+    [...document.querySelectorAll('.tile')].forEach(e=>{if(!e.classList.contains('drag'))e.remove()});seenDone.clear()}
+  // 仲間（手札の数）
+  $('mates').innerHTML=V.players.map((p,i)=>`<span class="mate${p.think?' think':''}${i===V.me?' me':''}" style="--c:${p.c}" data-p="${i}"><i></i>${esc(p.n)}<small>${V.tiles.filter(t=>t.where==='hand'&&t.holder===i).length}枚</small></span>`).join('');
+  // 枠：はまった部品は、はめた人の色で描く。ヒントで見せた字は薄く。できた字は点が浮かぶ
+  V.chars.forEach((c,i)=>{const f=$('frames').children[i],sv=f.querySelector('svg');
+    sv.innerHTML=(V.hinted.includes(i)?strokes(c.slots.flatMap((s,j)=>slotD(c.ch,j)),'#e8d6bf',3.6):'')+c.slots.map((s,j)=>s.by!=null?strokes(slotD(c.ch,j),c.at!=null?'#3b2a20':V.players[s.by].c):'').join('');
+    f.classList.toggle('done',c.at!=null);
+    if(c.at!=null&&c.pts&&!seenDone.has(i)){seenDone.add(i);f.insertAdjacentHTML('beforeend',`<span class="pts">+${c.pts.sum}</span>`)}});
+  // 手札
+  const hand=$('hand'),mine=V.tiles.filter(t=>t.where==='hand'&&t.holder===V.me&&!(drag&&drag.id===t.id));
+  [...hand.querySelectorAll('.tile,.empty')].forEach(e=>{if(!e.classList.contains('tile')||!mine.some(t=>t.id===e.dataset.id))e.remove()});
+  for(const t of mine)if(!hand.querySelector(`.tile[data-id="${t.id}"]`))hand.append(tileEl(t));
+  if(!mine.length)hand.insertAdjacentHTML('beforeend',`<span class="empty">${V.me<0?'観戦中':'手札はもうありません。机の部品も拾えます'}</span>`);
+  hand.hidden=V.me<0&&!V.watchHand;
+  // 机の上：転がっている札と、だれかが運んでいる札
+  const desk=$('desk');
+  for(const t of V.tiles){let e=desk.querySelector(`.tile[data-id="${t.id}"]`);
+    const show=(t.where==='desk'||t.where==='air')&&!(drag&&drag.id===t.id);
+    if(!show){if(e)e.remove();continue}
+    if(!e){e=tileEl(t);desk.append(e)}
+    let p;
+    if(t.where==='desk')p=px(t);
+    else if(t.dx!=null){const d=desk.getBoundingClientRect();p={x:t.dx*d.width-S/2,y:t.dy*d.height-S/2}}   // だれかが指で動かしている
+    else if(t.go)p=t.to&&t.to.i!=null?framePx(t.to.i):px(t.to);
+    else p=t.from==='hand'?matePx(t.held):px(t.from);
+    e.classList.toggle('moving',t.where==='air'&&!!t.go||t.dx!=null);
+    e.style.left=p.x+'px';e.style.top=p.y+'px';markTile(e,t)}
 }
-function check(){if(G.over||!G.chars.every(c=>c.at!=null))return;G.over=true;setTimeout(showResult,900)}
+const seenDone=new Set();
+function toast(m){const t=$('toast');t.textContent=m;t.hidden=false;clearTimeout(toast.k);toast.k=setTimeout(()=>t.hidden=true,1600)}
 
 // ---------- つまんで動かす（自分） ----------
 let drag=null;
 function grab(e){
-  if(!G||G.over)return;const el=e.currentTarget,t=G.tiles.get(el.dataset.id);
-  if(!t||!(t.where==='hand'&&t.holder===0||t.where==='desk'))return;
+  if(!V||V.over||V.me<0||!ENG)return;const el=e.currentTarget,t=V.tiles.find(x=>x.id===el.dataset.id);
+  if(!t||!(t.where==='hand'&&t.holder===V.me||t.where==='desk'&&t.held==null))return;
+  if(ENG.grab(t.id)===false)return;
   e.preventDefault();const r=el.getBoundingClientRect();
-  drag={t,el,dx:e.clientX-r.left,dy:e.clientY-r.top,from:t.where,ox:t.x,oy:t.y};
-  if(t.where==='desk'){t.where='fly'}   // 机から拾った：ほかの人（CPU）が同時に拾わないように
-  t.held=0;markTile(el,t);el.classList.add('drag');document.body.append(el);move(e);
+  drag={id:t.id,el,dx:e.clientX-r.left,dy:e.clientY-r.top};
+  el.classList.add('drag','held');el.style.setProperty('--pc',V.players[V.me].c);el.querySelector('.who').textContent=V.players[V.me].n;
+  document.body.append(el);move(e);
   el.setPointerCapture?.(e.pointerId);
   el.addEventListener('pointermove',move);el.addEventListener('pointerup',drop);el.addEventListener('pointercancel',drop);
 }
 function move(e){if(!drag)return;drag.el.style.left=(e.clientX-drag.dx)+'px';drag.el.style.top=(e.clientY-drag.dy)+'px';
-  const i=frameAt(e.clientX,e.clientY);[...$('frames').children].forEach((f,k)=>f.classList.toggle('drop',k===i))}
+  const i=frameAt(e.clientX,e.clientY);[...$('frames').children].forEach((f,k)=>f.classList.toggle('drop',k===i));
+  if(ENG.moving){const d=$('desk').getBoundingClientRect();ENG.moving(drag.id,(e.clientX-drag.dx+S/2-d.left)/d.width,(e.clientY-drag.dy+S/2-d.top)/d.height)}}
 function drop(e){
-  if(!drag)return;const {t,el}=drag;drag=null;
+  if(!drag)return;const {id,el}=drag;drag=null;
   el.removeEventListener('pointermove',move);el.removeEventListener('pointerup',drop);el.removeEventListener('pointercancel',drop);
   [...$('frames').children].forEach(f=>f.classList.remove('drop'));
   const i=frameAt(e.clientX,e.clientY),d=$('desk').getBoundingClientRect(),r=el.getBoundingClientRect();
-  el.remove();t.held=null;
-  if(i>=0){t.where='hand';place(t,i,0);return}
-  if(e.clientX>=d.left&&e.clientX<=d.right&&e.clientY>=d.top&&e.clientY<=d.bottom){
-    // 机に置く（枠の帯の上なら、ずらす）
-    const x=Math.max(4,Math.min(d.width-62,r.left-d.left)),y=Math.max(4,Math.min(d.height-62,r.top-d.top));
-    const fr=$('frames').getBoundingClientRect();const onBand=y+58>fr.top-d.top&&y<fr.bottom-d.top;
-    if(onBand)toDesk(t,-1,undefined,undefined,0);else toDesk(t,-1,x,y,0);return}
-  // 机の外：手札に戻す（机から拾ったものも、自分の手札へ）
-  t.where='hand';t.holder=0;render();
+  el.remove();
+  if(i>=0){ENG.drop(id,{i});return}
+  if(e.clientX>=d.left&&e.clientX<=d.right&&e.clientY>=d.top&&e.clientY<=d.bottom){ENG.drop(id,fromPx(r.left-d.left,r.top-d.top));return}
+  ENG.drop(id,{hand:true});   // 机の外：手札へ（机から拾ったものも、自分の手札へ）
 }
 
-// ---------- CPU の仲間 ----------
-// それぞれ1.5〜4秒ごとに考える。分かった部品は、手札からでも机からでも正しい枠へはめる。分からなければ、ときどき手札を机に出す
-//   分かる見込みは、時間がたつほど・その文字がもうできかけているほど上がる（はじめは半分くらいしか分からない）
-function cpuTick(now){
-  if(!G||G.over)return;
-  G.players.forEach((p,pi)=>{
-    if(!p.cpu||now<p.next||p.busy)return;
-    p.next=now+1500+Math.random()*2500;
-    const sec=(now-G.t0)/1000;
-    const cand=[...G.tiles.values()].filter(t=>(t.where==='hand'&&t.holder===pi)||t.where==='desk');
-    const fits=t=>G.chars.findIndex(c=>c.at==null&&c.slots.some(s=>s.by==null&&s.el===t.el&&s.pos===t.pos));
-    const knows=t=>{const i=fits(t);if(i<0)return -1;const started=G.chars[i].slots.some(s=>s.by!=null);
-      return Math.random()<Math.min(.9,.35+sec*.012+(started?.25:0))?i:-1};
-    for(const t of shuffle(cand)){const i=knows(t);if(i>=0){fly(t,pi,i);return}}
-    const mine=cand.filter(t=>t.where==='hand');
-    if(mine.length&&Math.random()<.4){const t=mine[Math.floor(Math.random()*mine.length)];fly(t,pi,-1)}
-  });
-  render();
-}
-// CPU の手：札が仲間のところ（または机の上）から、枠（または机）へ飛ぶ
-function fly(t,pi,i){
-  const p=G.players[pi],desk=$('desk'),d=desk.getBoundingClientRect();
-  let x0,y0;
-  if(t.where==='desk'){x0=t.x;y0=t.y}else{const m=document.querySelector(`.mate[data-p="${pi}"]`),r=m?m.getBoundingClientRect():d;x0=Math.max(6,Math.min(d.width-64,r.left-d.left+10));y0=22}
-  let x1,y1;
-  if(i>=0){const f=$('frames').children[i].getBoundingClientRect();x1=f.left-d.left+f.width/2-29;y1=f.top-d.top+f.height/2-29}
-  else{const s=freeSpot(null);x1=s.x;y1=s.y}
-  t.where='fly';t.held=pi;t.x=x0;t.y=y0;p.busy=true;p.think=true;render();
-  const e=desk.querySelector(`.tile[data-id="${t.id}"]`),g=G;
-  setTimeout(()=>{if(G!==g)return;e.classList.add('moving');e.style.left=x1+'px';e.style.top=y1+'px'},450);   // つかんだところを見せてから動かす
-  setTimeout(()=>{p.busy=false;p.think=false;if(G!==g||G.over&&i<0)return;t.held=null;
-    if(i>=0){t.where='hand';t.holder=pi;place(t,i,pi)}else toDesk(t,-1,x1,y1,pi)},1050);
-}
+// ---------- ひとりで遊ぶ（CPU の仲間と） ----------
+const SOLO=(()=>{
+  let g=null,cpuN=store.get('yj-cpu',2),qi=store.get('yj-q',3);   // はじめては温故知新から（部品が分かれる字が多い。一石二鳥は全部まるごとの字で、協力が生まれにくい）
+  const now=()=>performance.now(),sec=()=>(now()-V.t0)/1000;
+  function start(){
+    const q=D.list[qi%D.list.length];qi++;store.set('yj-q',qi);
+    const players=[{n:'あなた',c:COLS[0],cpu:false},...CPU_NAMES.slice(0,cpuN).map((n,i)=>({n,c:COLS[i+1],cpu:true,next:0}))];
+    g=C.deal(q,D.K,players.length);
+    V={...g,players,me:0,t0:now(),over:false,game:(V&&V.game||0)+1};
+    players.forEach((p,i)=>{if(p.cpu)p.next=V.t0+1800+Math.random()*1500+i*500});
+    $('start').hidden=true;$('result').hidden=true;$('hintBtn').hidden=false;$('quitBtn').hidden=false;
+    render();
+  }
+  const T=id=>V.tiles.find(t=>t.id===id);
+  function landDesk(t,spot,by){Object.assign(t,{where:'desk',holder:null,held:null,dropBy:by,dx:null,dy:null,go:false},spot)}
+  function put(t,i,by){
+    const r=C.place(V,t,i,by,sec());
+    if(!r){landDesk(t,C.freeSpot(V,(i%2)*0.6+0.2),by);if(by===0)toast('ここではないみたい…');render();return}
+    render();if(r.all)finish(false);
+  }
+  const eng={
+    grab(id){const t=T(id);if(!t)return false;t.held=0;return true},
+    drop(id,to){const t=T(id);if(!t)return;t.held=null;
+      if(to.i!=null)put(t,to.i,0);
+      else if(to.hand){Object.assign(t,{where:'hand',holder:0,dropBy:null})}
+      else landDesk(t,to,0);
+      render()},
+    hint(){if(C.hint(V)<0)toast('ヒントはもうありません');else toast('1文字を薄く見せました（その文字は −20点）');render()},
+    quit(){finish(true)},
+  };
+  // CPU の仲間：それぞれ1.5〜4秒ごとに考える。つかんだところを見せてから（0.45秒）運ぶ（0.6秒）
+  function tick(){
+    if(!V||V.over||ENG!==eng)return;
+    V.players.forEach((p,pi)=>{
+      if(!p.cpu||now()<p.next||p.busy)return;
+      p.next=now()+1500+Math.random()*2500;
+      const c=C.cpuChoose(V,pi,sec());if(!c)return;const t=c.t,q=V;
+      t.from=t.where==='desk'?{u:t.u,band:t.band,v:t.v}:'hand';t.to=c.i>=0?{i:c.i}:C.freeSpot(V);
+      t.where='air';t.held=pi;t.go=false;p.busy=p.think=true;render();
+      setTimeout(()=>{if(V!==q)return;t.go=true;render()},450);
+      setTimeout(()=>{if(V!==q)return;p.busy=p.think=false;t.held=null;t.go=false;
+        if(c.i>=0){t.holder=pi;put(t,c.i,pi)}else{landDesk(t,t.to,pi);render()}},1050);
+    });
+  }
+  function finish(gaveUp){if(V.over)return;V.over=true;V.gaveUp=gaveUp;setTimeout(()=>showResult(gaveUp,{next:start,back:()=>{$('result').hidden=true;$('start').hidden=false}}),gaveUp?0:900)}
+  function renderStart(){$('cpuN').innerHTML=[0,1,2,3].map(n=>`<button class="pill${n===cpuN?' on':''}" data-n="${n}" type="button">${n?n+'人':'ひとり'}</button>`).join('');
+    $('cpuN').querySelectorAll('button').forEach(b=>b.onclick=()=>{cpuN=+b.dataset.n;store.set('yj-cpu',cpuN);renderStart()})}
+  return {eng,start,tick,renderStart};
+})();
 
 // ---------- 時計・ヒント・結果 ----------
-function loop(now){
-  if(G&&!G.over){$('clock').textContent=Math.floor((now-G.t0)/1000)+'秒';cpuTick(now)}
+function loop(){
+  if(V&&!V.over){$('clock').textContent=Math.floor((performance.now()-V.t0)/1000)+'秒';SOLO.tick()}
   requestAnimationFrame(loop)}
-$('hintBtn').onclick=()=>{if(!G||G.over)return;
-  // まだできていない文字のうち、いちばん進んでいない文字を薄く見せる（その文字の点が 20 減る）
-  const left=G.chars.map((c,i)=>({i,n:c.slots.filter(s=>s.by!=null).length/c.slots.length})).filter(x=>G.chars[x.i].at==null&&!G.hinted.has(x.i)).sort((a,b)=>a.n-b.n);
-  if(!left.length){toast('ヒントはもうありません');return}G.hinted.add(left[0].i);render();toast('1文字を薄く見せました（その文字は −20点）')};
-$('quitBtn').onclick=()=>{if(!G||G.over)return;G.over=true;showResult(true)};
-function showResult(gaveUp){
-  const sec=(performance.now()-G.t0)/1000,total=G.chars.reduce((a,c)=>a+(c.pts?c.pts.sum:0),0)+(gaveUp?0:50);
-  const rows=G.chars.map(c=>`<div class="row"><span class="k">${c.ch}</span><span class="d">${c.pts?`${c.at.toFixed(1)}秒・速さ ${c.pts.speed}　協力 ${c.pts.coop}${c.pts.hint?`　ヒント ${c.pts.hint}`:''}<br><span class="who">${c.pts.who.map(w=>`<i style="--c:${G.players[w].c}"></i>`).join('')}</span> ${c.pts.who.length}人で作った`:'できなかった'}</span><span class="p">${c.pts?c.pts.sum:0}</span></div>`).join('');
-  const best=store.get('yj-best',0);if(!gaveUp&&total>best)store.set('yj-best',total);
-  $('result').innerHTML=`<h2>${gaveUp?'またこんど！':'完成！'}</h2><div class="ans">${G.q.w}</div><p><b>${G.q.y}</b><br>${G.q.m}</p>
-    <div class="res">${rows}${gaveUp?'':`<div class="row"><span class="d">四字熟語ができたボーナス</span><span class="p">50</span></div>`}</div>
-    <div class="total">${total}点</div><p class="credit">${gaveUp?'':`${sec.toFixed(1)}秒で完成。`}これまでの最高 ${Math.max(best,gaveUp?best:total)}点</p>
-    <button class="go" id="nextBtn" type="button">つぎの四字熟語</button><button class="pill" id="backBtn" type="button">はじめの画面へ</button>`;
+$('hintBtn').onclick=()=>{if(V&&!V.over&&ENG)ENG.hint()};
+$('quitBtn').onclick=()=>{if(V&&!V.over&&ENG)ENG.quit()};
+// 結果：1文字ごとの点と、だれが作ったか。btn：{next, back}（みんなで遊ぶときは online.js が別のボタンを出す）
+function showResult(gaveUp,btn){
+  const total=C.total(V,!gaveUp),sec=V.chars.reduce((a,c)=>Math.max(a,c.at||0),0);
+  const rows=V.chars.map(c=>`<div class="row"><span class="k">${c.ch}</span><span class="d">${c.pts?`${c.at.toFixed(1)}秒・速さ ${c.pts.speed}　協力 ${c.pts.coop}${c.pts.hint?`　ヒント ${c.pts.hint}`:''}<br><span class="who">${c.pts.who.map(w=>`<i style="--c:${V.players[w].c}"></i>`).join('')}</span> ${c.pts.who.length}人で作った`:'できなかった'}</span><span class="p">${c.pts?c.pts.sum:0}</span></div>`).join('');
+  const best=store.get('yj-best',0);if(!gaveUp&&total>best&&btn&&btn.next)store.set('yj-best',total);
+  $('result').innerHTML=`<h2>${gaveUp?'またこんど！':'完成！'}</h2><div class="ans">${V.q.w}</div><p><b>${V.q.y}</b><br>${V.q.m}</p>
+    <div class="res">${rows}${gaveUp?'':`<div class="row"><span class="d">四字熟語ができたボーナス</span><span class="p">${C.BONUS}</span></div>`}</div>
+    <div class="total">${total}点</div><p class="credit">${gaveUp?'':`${sec.toFixed(1)}秒で完成。`}${btn&&btn.next?`これまでの最高 ${Math.max(best,gaveUp?best:total)}点`:''}</p>
+    <div id="resBtns">${btn&&btn.next?`<button class="go" id="nextBtn" type="button">つぎの四字熟語</button><br><button class="pill" id="backBtn" type="button" style="margin-top:10px">はじめの画面へ</button>`:''}</div>`;
   $('result').hidden=false;$('hintBtn').hidden=true;$('quitBtn').hidden=true;
-  $('nextBtn').onclick=newGame;$('backBtn').onclick=()=>{$('result').hidden=true;$('start').hidden=false};
+  if(btn&&btn.next){$('nextBtn').onclick=btn.next;$('backBtn').onclick=btn.back}
 }
-// はじめの画面：CPU の人数
-function renderStart(){$('cpuN').innerHTML=[0,1,2,3].map(n=>`<button class="pill${n===cpuN?' on':''}" data-n="${n}" type="button">${n?n+'人':'ひとり'}</button>`).join('');
-  $('cpuN').querySelectorAll('button').forEach(b=>b.onclick=()=>{cpuN=+b.dataset.n;store.set('yj-cpu',cpuN);renderStart()})}
-$('startBtn').onclick=newGame;
-renderStart();requestAnimationFrame(loop);
-addEventListener('resize',()=>{if(!G)return;for(const t of G.tiles.values())if(t.where==='desk'){const d=$('desk').getBoundingClientRect();t.x=Math.min(t.x,d.width-62);t.y=Math.min(t.y,d.height-62)}render()});
+$('startBtn').onclick=()=>{ENG=SOLO.eng;SOLO.start()};
+SOLO.renderStart();requestAnimationFrame(loop);
+addEventListener('resize',render);
 </script>
 </body>
 </html>
