@@ -78,6 +78,9 @@ function partsOf(ch, svg) {
 //   ここでは、漢字ごとにいちばん外側の部品に分け、線（path の d）だけを残した
 `;
   fs.writeFileSync(OUT, head + 'window.YOJI=' + JSON.stringify({ list: LIST, K }) + ';\n');
+  // サーバー用（線の形はいらない。どの字がどの部品に分かれるかだけ）：sync-yoji.sh でサーバーに写す
+  const KS = Object.fromEntries(Object.entries(K).map(([ch, ps]) => [ch, ps.map((p) => ({ el: p.el, pos: p.pos }))]));
+  fs.writeFileSync(path.join(__dirname, '..', 'data-core.cjs'), head.replace('のデータ', 'のデータ（サーバー用：部品の分け方だけ）') + 'module.exports=' + JSON.stringify({ list: LIST, K: KS }) + ';\n');
   for (const x of LIST) console.log(x.w, [...x.w].map((c) => c + '(' + K[c].map((p) => p.el + ':' + p.pos).join(' ') + ')').join(' '));
   console.log('漢字', chars.length, '・部品', Object.values(K).reduce((a, p) => a + p.length, 0));
 })();

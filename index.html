@@ -20,7 +20,7 @@ html,body{height:100%}
 body{margin:0;background-color:var(--bg);background-image:radial-gradient(var(--dot) 18%,transparent 19%),radial-gradient(var(--dot) 18%,transparent 19%);background-size:34px 34px;background-position:0 0,17px 17px;
   color:var(--ink);font-family:var(--ui);font-weight:500;overflow:hidden;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;touch-action:none}
 .app{height:100%;max-width:560px;margin:0 auto;display:flex;flex-direction:column;gap:8px;padding:10px max(16px,env(safe-area-inset-left)) calc(10px + env(safe-area-inset-bottom))}
-header{display:flex;align-items:center;gap:8px}
+header{display:flex;align-items:center;gap:8px;position:relative;z-index:46}   /* 部屋の画面（.over）の上にも出す（札・💬・出る） */
 h1{flex:1;margin:0;font-family:var(--pop);font-weight:400;font-size:1.1rem;color:var(--accent)}
 .pill{font:inherit;font-weight:700;font-size:.85rem;padding:6px 14px;border-radius:999px;border:2px solid var(--line);background:var(--card);color:var(--ink);box-shadow:0 3px 0 var(--line);cursor:pointer}
 .go{font:inherit;font-family:var(--pop);font-size:1.25rem;border:0;border-radius:16px;background:var(--accent);color:#fff;padding:12px 30px;box-shadow:0 4px 0 #b9551f;cursor:pointer}
@@ -60,7 +60,7 @@ h1{flex:1;margin:0;font-family:var(--pop);font-weight:400;font-size:1.1rem;color
 .hand .empty{margin:auto;font-size:.8rem;color:var(--muted);font-weight:700}
 .bar{display:flex;gap:6px;justify-content:flex-end}
 /* 最初の画面・結果 */
-.over{position:fixed;inset:0;z-index:40;display:flex;flex-direction:column;align-items:center;gap:12px;padding:30px 18px;overflow:auto;background:color-mix(in srgb,var(--bg) 96%,transparent);text-align:center}
+.over{position:fixed;inset:0;z-index:40;display:flex;flex-direction:column;align-items:center;gap:12px;padding:64px 18px 30px;overflow:auto;background:color-mix(in srgb,var(--bg) 96%,transparent);text-align:center}
 .over>:first-child{margin-top:auto}.over>:last-child{margin-bottom:auto}
 .over h2{margin:0;font-family:var(--pop);font-weight:400;font-size:1.7rem;color:var(--accent)}
 .over p{margin:0;max-width:430px;line-height:1.6}
@@ -74,6 +74,32 @@ h1{flex:1;margin:0;font-family:var(--pop);font-weight:400;font-size:1.1rem;color
 .ans{font-size:2.6rem;font-weight:900;letter-spacing:.1em}
 .toast{position:fixed;left:50%;bottom:120px;transform:translateX(-50%);z-index:60;background:var(--ink);color:#fff;padding:8px 16px;border-radius:999px;font-weight:700;font-size:.9rem;pointer-events:none}
 .credit{font-size:.7rem;color:var(--muted)}.credit a{color:inherit}
+/* みんなで遊ぶ（online.js）：部屋の一覧・左上の札・部屋の画面・飛び入り・定型文 */
+.rlist{width:100%;max-width:420px;display:flex;flex-direction:column;gap:5px}
+.rlistH{margin:6px 0 0;font-weight:700;font-size:.85rem;color:var(--muted);text-align:left}
+.rrow{display:flex;flex-direction:column;align-items:flex-start;gap:1px;text-decoration:none;color:var(--ink);background:var(--card);border:2px solid var(--line);border-radius:12px;padding:7px 12px;box-shadow:0 3px 0 var(--line)}
+.rrow b{font-size:.95rem}.rrow span{font-size:.78rem;color:var(--muted);font-weight:700}
+.rnone,.rnote{margin:0;font-size:.82rem;color:var(--muted);font-weight:700}.rmake{align-self:center;margin-top:4px}
+.pill.on{background:var(--on);border-color:var(--accent)}
+.rbadge{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.8rem;font-weight:700;padding:5px 11px;border-radius:999px;background:var(--on);border:2px solid var(--accent)}
+.rbadge i{display:inline-block;width:8px;height:8px;border-radius:50%;background:#6cc94e;margin-right:6px;vertical-align:1px;animation:rdot 1.4s ease-in-out infinite}
+@keyframes rdot{50%{opacity:.25}}
+header:has(.rbadge) h1{display:none}
+.rseats{width:100%;max-width:430px;display:flex;flex-direction:column;gap:5px}
+.rseat{display:flex;align-items:center;gap:8px;background:var(--card);border:2px solid var(--line);border-radius:12px;padding:6px 12px;font-size:.9rem;text-align:left}
+.rseat>span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.rseat.mine{border-color:var(--accent);background:var(--on)}.rseat .pill{font-size:.75rem;padding:3px 10px}
+.rready{font-style:normal;font-size:.72rem;font-weight:700;padding:2px 8px;border-radius:999px;background:var(--bg);color:var(--muted);border:1.5px solid var(--line)}.rready.on{background:#e3f5dc;color:#2f8a3c;border-color:#8fd07e}
+.rinv{width:100%;max-width:430px;display:flex;gap:6px;align-items:center}.rinv input{flex:1;min-width:0;font:inherit;font-size:.78rem;padding:6px 8px;border:2px solid var(--line);border-radius:10px;background:var(--card);color:var(--ink)}.rinv a{text-decoration:none}
+.rname{font-weight:700;font-size:.85rem;color:var(--muted)}.rname input{font:inherit;width:9em;padding:5px 8px;border:2px solid var(--line);border-radius:10px;background:var(--card);color:var(--ink)}
+.go:disabled{opacity:.45;cursor:default}
+.jump{display:flex;flex-direction:column;align-items:center;gap:6px;padding:10px;border:2px dashed var(--accent);border-radius:16px;background:var(--card)}
+.jump p{margin:0;font-weight:700;font-size:.85rem;text-align:center}.jump div{display:flex;flex-wrap:wrap;justify-content:center;gap:6px}
+.mate.me{background:var(--on)}
+.sayBox{position:fixed;z-index:45;top:54px;right:max(16px,calc(50% - 264px));width:min(320px,calc(100% - 32px));display:flex;flex-wrap:wrap;gap:6px;padding:10px;background:var(--card);border:2px solid var(--accent);border-radius:16px;box-shadow:0 6px 0 var(--line)}
+.sayBox .pill{font-size:.85rem;padding:6px 12px}
+.sayFeed{position:fixed;z-index:44;top:56px;left:max(16px,calc(50% - 264px));display:flex;flex-direction:column;gap:5px;pointer-events:none;max-width:calc(100% - 32px)}
+.say{align-self:flex-start;background:var(--card);border:2px solid var(--line);border-radius:14px 14px 14px 4px;padding:5px 12px;font-weight:700;font-size:.9rem;box-shadow:0 3px 0 var(--line);transition:opacity .4s}
+.say b{color:var(--accent);margin-right:8px}.say.out{opacity:0}
 </style>
 </head>
 <body>
@@ -91,6 +117,7 @@ h1{flex:1;margin:0;font-family:var(--pop);font-weight:400;font-size:1.1rem;color
   <p>どこに使うか分からない部品は、机に置いておけば、だれでも拾えます。<br>速く、みんなで協力するほど点が高い（1文字ごとに点がつきます）。</p>
   <div><b>いっしょに遊ぶ CPU</b><div class="choices" id="cpuN" style="margin-top:6px"></div></div>
   <button class="go" id="startBtn" type="button">はじめる</button>
+  <button class="pill" id="roomBtn" type="button">みんなで遊ぶ</button>
   <p class="credit">漢字の形：<a href="https://kanjivg.tagaini.net" target="_blank" rel="noopener">KanjiVG</a>（CC BY-SA 3.0）</p>
 </div>
 <div class="over" id="result" hidden></div>
@@ -278,5 +305,7 @@ $('startBtn').onclick=()=>{ENG=SOLO.eng;SOLO.start()};
 SOLO.renderStart();requestAnimationFrame(loop);
 addEventListener('resize',render);
 </script>
+<script src="room.js"></script>
+<script src="online.js"></script>
 </body>
 </html>
