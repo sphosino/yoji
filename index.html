@@ -28,6 +28,7 @@ h1{flex:1;margin:0;font-family:var(--pop);font-weight:400;font-size:1.1rem;color
 /* お題：読みと意味。答えの漢字は見せない */
 .odai{background:var(--card);border:2px solid var(--line);border-radius:16px;padding:8px 12px;display:flex;align-items:center;gap:10px}
 .odai div{flex:1;min-width:0}.odai b{display:block;font-family:var(--pop);font-weight:400;font-size:1.15rem;letter-spacing:.04em}.odai span{display:block;font-size:.8rem;color:var(--muted);font-weight:700}
+.odai b.secret{color:var(--muted);letter-spacing:0}   /* 読みを隠すモード：意味だけで当てる */
 .clock{font-family:var(--pop);font-size:1.1rem;color:var(--accent);font-variant-numeric:tabular-nums}
 .mates{display:flex;gap:6px;flex-wrap:wrap}
 .mate{display:flex;align-items:center;gap:5px;padding:3px 10px 3px 4px;border-radius:999px;background:var(--card);border:2px solid var(--line);font-size:.78rem;font-weight:700}
@@ -54,6 +55,7 @@ h1{flex:1;margin:0;font-family:var(--pop);font-weight:400;font-size:1.1rem;color
 .tile.held .who{display:block}
 .tile .dot{display:none;position:absolute;right:4px;top:4px;width:11px;height:11px;border-radius:50%;background:var(--dc);border:2px solid #fff}
 .tile.dot .dot{display:block}.tile.held .dot{display:none}
+.tile.gone{opacity:.5;cursor:not-allowed}   /* 自分で机に置いた札：もう持てない */
 .hand{position:relative;flex:0 0 auto;min-height:84px;padding:10px;border-radius:18px;background:var(--card);border:2px solid var(--line);display:flex;flex-wrap:wrap;gap:8px;align-content:flex-start}
 .hand .tile{position:relative}
 .hand .lbl{position:absolute;left:12px;top:-10px;padding:0 8px;background:var(--card);font-size:.72rem;font-weight:900;color:var(--muted)}
@@ -104,7 +106,7 @@ header:has(.rbadge) h1{display:none}
 </head>
 <body>
 <div class="app">
-  <header><h1>四字熟語あつめ</h1><button class="pill" id="hintBtn" type="button" hidden>ヒント</button><button class="pill" id="quitBtn" type="button" hidden>やめる</button></header>
+  <header><h1>四字熟語あつめ</h1><button class="pill" id="hintBtn" type="button" hidden>ヒント</button><button class="pill" id="quitBtn" type="button" hidden>ここで終える</button></header>
   <div class="odai"><div><b id="yomi">　</b><span id="imi">　</span></div><span class="clock" id="clock">0</span></div>
   <div class="mates" id="mates"></div>
   <div class="desk" id="desk"><div class="frames" id="frames"></div></div>
@@ -114,8 +116,9 @@ header:has(.rbadge) h1{display:none}
 <div class="over" id="start">
   <h2>四字熟語あつめ</h2>
   <p>漢字の<b>部品</b>がみんなに配られます。読みと意味をヒントに、机の4つの枠に部品をはめて、<b>四字熟語</b>を完成させよう。</p>
-  <p>どこに使うか分からない部品は、机に置いておけば、だれでも拾えます。<br>速く、みんなで協力するほど点が高い（1文字ごとに点がつきます）。</p>
+  <p>どこに使うか分からない部品は、机に置いておけば、だれでも拾えます。<b>答えに使わない部品</b>も混ざっているので、出しすぎると机が散らかります。机に置いた部品は、もう自分では持てません。まちがった枠に置くと、最後に1回 −10点。<br>速く、みんなで協力するほど点が高い（1文字ごとに点がつきます）。</p>
   <div><b>いっしょに遊ぶ CPU</b><div class="choices" id="cpuN" style="margin-top:6px"></div></div>
+  <div><b>読み方</b><div class="choices" id="yomiMode" style="margin-top:6px"></div></div>
   <button class="go" id="startBtn" type="button">はじめる</button>
   <button class="pill" id="roomBtn" type="button">みんなで遊ぶ</button>
   <p class="credit">漢字の形：<a href="https://kanjivg.tagaini.net" target="_blank" rel="noopener">KanjiVG</a>（CC BY-SA 3.0）</p>
@@ -147,7 +150,7 @@ function boxOf(d){const k=d.join('|');if(boxCache.has(k))return boxCache.get(k);
   meas.innerHTML=`<g>${d.map(x=>`<path d="${x}"/>`).join('')}</g>`;const b=meas.firstChild.getBBox();const pad=7;
   const s=Math.max(b.width,b.height)+pad*2,cx=b.x+b.width/2,cy=b.y+b.height/2;const r=[cx-s/2,cy-s/2,s,s];boxCache.set(k,r);return r}
 const strokes=(d,col='#3b2a20',w=4.2)=>`<g fill="none" stroke="${col}" stroke-width="${w}" stroke-linecap="round" stroke-linejoin="round">${d.map(x=>`<path d="${x}"/>`).join('')}</g>`;
-const dOf=(q,src)=>D.K[[...q.w][src[0]]][src[1]].d;   // 札の線：配られたときの字の、その部品
+const dOf=(q,src)=>D.K[typeof src[0]==='string'?src[0]:[...q.w][src[0]]][src[1]].d;   // 札の線：配られたときの字の、その部品（ダミーは字そのものを持つ）
 const slotD=(ch,j)=>D.K[ch][j].d;
 
 // ---------- 机の上の場所 ----------
@@ -168,12 +171,13 @@ function tileEl(t){const e=document.createElement('div');e.className='tile';e.da
 // 札に「だれがつかんでいるか」「だれが机に出したか」を付ける
 function markTile(e,t){const p=t.held!=null?V.players[t.held]:null;e.classList.toggle('held',!!p);
   if(p){e.style.setProperty('--pc',p.c);e.querySelector('.who').textContent=p.n}
-  const dp=t.where==='desk'&&t.dropBy!=null?V.players[t.dropBy]:null;e.classList.toggle('dot',!!dp);if(dp)e.style.setProperty('--dc',dp.c)}
+  const dp=t.where==='desk'&&t.dropBy!=null?V.players[t.dropBy]:null;e.classList.toggle('dot',!!dp);if(dp)e.style.setProperty('--dc',dp.c);
+  e.classList.toggle('gone',t.where==='desk'&&t.held==null&&V.me>=0&&!C.canTake(V,t,V.me))}
 function render(){
   if(!V)return;
   if(shownQ!==V){/* 新しい問題：枠を作り直す */}
   const key=V.q.w+':'+(V.game||0);
-  if(shownQ!==key){shownQ=key;$('yomi').textContent=V.q.y;$('imi').textContent=V.q.m;
+  if(shownQ!==key){shownQ=key;$('yomi').textContent=V.hideYomi?'読みは ひみつ':V.q.y;$('yomi').classList.toggle('secret',!!V.hideYomi);$('imi').textContent=V.q.m;
     $('frames').innerHTML=V.chars.map((c,i)=>`<div class="frame" data-i="${i}"><svg viewBox="0 0 109 109"></svg></div>`).join('');
     [...document.querySelectorAll('.tile')].forEach(e=>{if(!e.classList.contains('drag'))e.remove()});seenDone.clear()}
   // 仲間（手札の数）
@@ -210,7 +214,8 @@ function toast(m){const t=$('toast');t.textContent=m;t.hidden=false;clearTimeout
 let drag=null;
 function grab(e){
   if(!V||V.over||V.me<0||!ENG)return;const el=e.currentTarget,t=V.tiles.find(x=>x.id===el.dataset.id);
-  if(!t||!(t.where==='hand'&&t.holder===V.me||t.where==='desk'&&t.held==null))return;
+  if(!t)return;
+  if(!C.canTake(V,t,V.me)){if(t.where==='desk'&&t.held==null)toast('自分で机に置いた札は、もう持てません');return}
   if(ENG.grab(t.id)===false)return;
   e.preventDefault();const r=el.getBoundingClientRect();
   drag={id:t.id,el,dx:e.clientX-r.left,dy:e.clientY-r.top};
@@ -235,13 +240,13 @@ function drop(e){
 
 // ---------- ひとりで遊ぶ（CPU の仲間と） ----------
 const SOLO=(()=>{
-  let g=null,cpuN=store.get('yj-cpu',2),qi=store.get('yj-q',3);   // はじめては温故知新から（部品が分かれる字が多い。一石二鳥は全部まるごとの字で、協力が生まれにくい）
+  let g=null,cpuN=store.get('yj-cpu',2),hideYomi=store.get('yj-hide-yomi',false),qi=store.get('yj-q',3);   // はじめては温故知新から（部品が分かれる字が多い。一石二鳥は全部まるごとの字で、協力が生まれにくい）
   const now=()=>performance.now(),sec=()=>(now()-V.t0)/1000;
   function start(){
     const q=D.list[qi%D.list.length];qi++;store.set('yj-q',qi);
     const players=[{n:'あなた',c:COLS[0],cpu:false},...CPU_NAMES.slice(0,cpuN).map((n,i)=>({n,c:COLS[i+1],cpu:true,next:0}))];
     g=C.deal(q,D.K,players.length);
-    V={...g,players,me:0,t0:now(),over:false,game:(V&&V.game||0)+1};
+    V={...g,players,me:0,t0:now(),over:false,hideYomi,game:(V&&V.game||0)+1};
     players.forEach((p,i)=>{if(p.cpu)p.next=V.t0+1800+Math.random()*1500+i*500});
     $('start').hidden=true;$('result').hidden=true;$('hintBtn').hidden=false;$('quitBtn').hidden=false;
     render();
@@ -250,7 +255,7 @@ const SOLO=(()=>{
   function landDesk(t,spot,by){Object.assign(t,{where:'desk',holder:null,held:null,dropBy:by,dx:null,dy:null,go:false},spot)}
   function put(t,i,by){
     const r=C.place(V,t,i,by,sec());
-    if(!r){landDesk(t,C.freeSpot(V,(i%2)*0.6+0.2),by);if(by===0)toast('ここではないみたい…');render();return}
+    if(!r){landDesk(t,C.freeSpot(V,(i%2)*0.6+0.2),by);if(by===0)toast(`ここではないみたい…（最後に −${C.MISS}点）`);render();checkStuck();return}
     render();if(r.all)finish(false);
   }
   const eng={
@@ -259,7 +264,7 @@ const SOLO=(()=>{
       if(to.i!=null)put(t,to.i,0);
       else if(to.hand){Object.assign(t,{where:'hand',holder:0,dropBy:null})}
       else landDesk(t,to,0);
-      render()},
+      render();checkStuck()},
     hint(){if(C.hint(V)<0)toast('ヒントはもうありません');else toast('1文字を薄く見せました（その文字は −20点）');render()},
     quit(){finish(true)},
   };
@@ -277,9 +282,13 @@ const SOLO=(()=>{
         if(c.i>=0){t.holder=pi;put(t,c.i,pi)}else{landDesk(t,t.to,pi);render()}},1050);
     });
   }
+  function checkStuck(){if(!V.over&&C.stuck(V)){V.stuck=true;finish(true)}}
   function finish(gaveUp){if(V.over)return;V.over=true;V.gaveUp=gaveUp;setTimeout(()=>showResult(gaveUp,{next:start,back:()=>{$('result').hidden=true;$('start').hidden=false}}),gaveUp?0:900)}
   function renderStart(){$('cpuN').innerHTML=[0,1,2,3].map(n=>`<button class="pill${n===cpuN?' on':''}" data-n="${n}" type="button">${n?n+'人':'ひとり'}</button>`).join('');
-    $('cpuN').querySelectorAll('button').forEach(b=>b.onclick=()=>{cpuN=+b.dataset.n;store.set('yj-cpu',cpuN);renderStart()})}
+    $('cpuN').querySelectorAll('button').forEach(b=>b.onclick=()=>{cpuN=+b.dataset.n;store.set('yj-cpu',cpuN);renderStart()});
+    // 読みを隠すモード（2026-10-27）：意味だけを手がかりにする。結果の画面では読みも出す
+    $('yomiMode').innerHTML=[[false,'見せる'],[true,'隠す（むずかしい）']].map(([h,l])=>`<button class="pill${h===hideYomi?' on':''}" data-h="${h}" type="button">${l}</button>`).join('');
+    $('yomiMode').querySelectorAll('button').forEach(b=>b.onclick=()=>{hideYomi=b.dataset.h==='true';store.set('yj-hide-yomi',hideYomi);renderStart()})}
   return {eng,start,tick,renderStart};
 })();
 
@@ -294,8 +303,8 @@ function showResult(gaveUp,btn){
   const total=C.total(V,!gaveUp),sec=V.chars.reduce((a,c)=>Math.max(a,c.at||0),0);
   const rows=V.chars.map(c=>`<div class="row"><span class="k">${c.ch}</span><span class="d">${c.pts?`${c.at.toFixed(1)}秒・速さ ${c.pts.speed}　協力 ${c.pts.coop}${c.pts.hint?`　ヒント ${c.pts.hint}`:''}<br><span class="who">${c.pts.who.map(w=>`<i style="--c:${V.players[w].c}"></i>`).join('')}</span> ${c.pts.who.length}人で作った`:'できなかった'}</span><span class="p">${c.pts?c.pts.sum:0}</span></div>`).join('');
   const best=store.get('yj-best',0);if(!gaveUp&&total>best&&btn&&btn.next)store.set('yj-best',total);
-  $('result').innerHTML=`<h2>${gaveUp?'またこんど！':'完成！'}</h2><div class="ans">${V.q.w}</div><p><b>${V.q.y}</b><br>${V.q.m}</p>
-    <div class="res">${rows}${gaveUp?'':`<div class="row"><span class="d">四字熟語ができたボーナス</span><span class="p">${C.BONUS}</span></div>`}</div>
+  $('result').innerHTML=`<h2>${gaveUp?'ここまで！':'完成！'}</h2>${V.stuck?'<p>はめられる部品を、だれも持てなくなりました。ここまでの点で数えます。</p>':''}<div class="ans">${V.q.w}</div><p><b>${V.q.y}</b><br>${V.q.m}</p>
+    <div class="res">${rows}${gaveUp?'':`<div class="row"><span class="d">四字熟語ができたボーナス</span><span class="p">${C.BONUS}</span></div>`}${V.miss?`<div class="row"><span class="d">まちがった枠に置いた ${V.miss}回</span><span class="p">−${V.miss*C.MISS}</span></div>`:''}</div>
     <div class="total">${total}点</div><p class="credit">${gaveUp?'':`${sec.toFixed(1)}秒で完成。`}${btn&&btn.next?`これまでの最高 ${Math.max(best,gaveUp?best:total)}点`:''}</p>
     <div id="resBtns">${btn&&btn.next?`<button class="go" id="nextBtn" type="button">つぎの四字熟語</button><br><button class="pill" id="backBtn" type="button" style="margin-top:10px">はじめの画面へ</button>`:''}</div>`;
   $('result').hidden=false;$('hintBtn').hidden=true;$('quitBtn').hidden=true;

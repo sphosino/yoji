@@ -39,7 +39,7 @@ if(!ROOM){
 // ---------- 部屋の中 ----------
 let RV=null,lastMv=0,pendingMv=null;
 const ERR_EN={};   // 四字熟語あつめは日本語だけ
-$('roomBtn').hidden=true;$('start').hidden=true;$('quitBtn').textContent='あきらめる';
+$('roomBtn').hidden=true;$('start').hidden=true;$('quitBtn').textContent='ここで終える';
 document.title='四字熟語あつめ（みんなで）｜また遊ぼ';
 const badge=document.createElement('span');badge.className='rbadge';document.querySelector('header').prepend(badge);
 const exitBtn=document.createElement('button');exitBtn.type='button';exitBtn.className='pill';exitBtn.textContent='出る';document.querySelector('header').append(exitBtn);
@@ -93,7 +93,7 @@ function apply(v,ev){
   renderBadge(v,was);
   if(v.players){
     const q=D.list[v.qIndex];
-    V={q,game:v.game,me:v.me,hinted:v.hinted||[],over:!playing,gaveUp:v.gaveUp,
+    V={q,n:v.players.length,miss:v.miss||0,game:v.game,me:v.me,hinted:v.hinted||[],over:!playing,gaveUp:v.gaveUp,stuck:v.stuck,
       players:v.players.map((p,i)=>({n:p.n+(p.cpu?'':''),c:COLS[i],cpu:p.cpu,think:p.think,handN:p.hand})),
       chars:v.chars.map((c,i)=>({ch:[...q.w][i],slots:c.slots,at:c.at,pts:c.pts})),
       tiles:v.tiles.map(t=>({...t})),
@@ -111,7 +111,7 @@ function apply(v,ev){
 function onEvent(e){
   if(e.say){showSay(e.say);return}
   if(e.joined){showToastBig(e.joined.p===RV.me?'飛び入り！ 手札を引き継ぎました':`${e.joined.n}が飛び入り！`);return}
-  if(e.miss!=null&&e.miss===RV.me){toast('ここではないみたい…');return}
+  if(e.miss!=null&&e.miss===RV.me){toast(`ここではないみたい…（最後に −${C.MISS}点）`);return}
   if(e.hint){toast(`${RV.players[e.hint.by].n}がヒントを使った（その字は −20点）`);return}
 }
 function showToastBig(m){toast(m)}
