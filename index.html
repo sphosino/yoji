@@ -22,6 +22,7 @@ body{margin:0;background-color:var(--bg);background-image:radial-gradient(var(--
 .app{height:100%;max-width:560px;margin:0 auto;display:flex;flex-direction:column;gap:8px;padding:10px max(16px,env(safe-area-inset-left)) calc(10px + env(safe-area-inset-bottom))}
 header{display:flex;align-items:center;gap:8px;position:relative;z-index:46}   /* 部屋の画面（.over）の上にも出す（札・💬・出る） */
 h1{flex:1;margin:0;font-family:var(--pop);font-weight:400;font-size:1.1rem;color:var(--accent)}
+.foot{text-align:center;font-size:.75rem;font-weight:700;color:var(--muted);margin:4px 0 0}.foot a{color:inherit}
 .pill{font:inherit;font-weight:700;font-size:.85rem;padding:6px 14px;border-radius:999px;border:2px solid var(--line);background:var(--card);color:var(--ink);box-shadow:0 3px 0 var(--line);cursor:pointer}
 .go{font:inherit;font-family:var(--pop);font-size:1.25rem;border:0;border-radius:16px;background:var(--accent);color:#fff;padding:12px 30px;box-shadow:0 4px 0 #b9551f;cursor:pointer}
 .go:active,.pill:active{transform:translateY(2px);box-shadow:0 1px 0 var(--line)}
@@ -122,6 +123,7 @@ header:has(.rbadge) h1{display:none}
   <button class="go" id="startBtn" type="button">はじめる</button>
   <button class="pill" id="roomBtn" type="button">みんなで遊ぶ</button>
   <p class="credit">漢字の形：<a href="https://kanjivg.tagaini.net" target="_blank" rel="noopener">KanjiVG</a>（CC BY-SA 3.0）</p>
+  <p class="foot"><a href="/">また遊ぼ</a>・<a href="/privacy.html">プライバシーポリシー</a></p>
 </div>
 <div class="over" id="result" hidden></div>
 <div class="toast" id="toast" hidden></div>
